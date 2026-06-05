@@ -1,0 +1,225 @@
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+local camera = workspace.CurrentCamera
+
+-- ==========================================
+-- 1. CLEANUP PREVIOUS INJECTIONS
+-- ==========================================
+local guiName = "EnhancedVisualBTools"
+if CoreGui:FindFirstChild(guiName) then
+	CoreGui[guiName]:Destroy()
+end
+
+-- ==========================================
+-- 2. GUI & VISUALS SETUP
+-- ==========================================
+local gui = Instance.new("ScreenGui")
+gui.Name = guiName
+gui.Parent = CoreGui
+gui.ResetOnSpawn = false
+
+-- Visual Selection Highlight (Yellow Outline)
+local selectionBox = Instance.new("SelectionBox")
+selectionBox.Color3 = Color3.fromRGB(255, 204, 0)
+selectionBox.LineThickness = 0.05
+selectionBox.Parent = gui
+
+-- 3D Handles
+local moveHandles = Instance.new("Handles")
+moveHandles.Style = Enum.HandlesStyle.Movement
+moveHandles.Parent = gui
+
+local scaleHandles = Instance.new("Handles")
+scaleHandles.Style = Enum.HandlesStyle.Resize
+scaleHandles.Parent = gui
+
+local rotateHandles = Instance.new("ArcHandles")
+rotateHandles.Parent = gui
+
+-- Bottom Menu Frame
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 420, 0, 60)
+frame.Position = UDim2.new(0.5, -210, 1, -100)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+frame.BorderSizePixel = 0
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+
+local uiListLayout = Instance.new("UIListLayout", frame)
+uiListLayout.FillDirection = Enum.FillDirection.Horizontal
+uiListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+uiListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+uiListLayout.Padding = UDim.new(0, 10)
+
+-- Button Generator Function
+local function createButton(name, text)
+	local btn = Instance.new("TextButton", frame)
+	btn.Name = name
+	btn.Size = UDim2.new(0, 90, 0, 40)
+	btn.Text = text
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 14
+	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+	return btn
+end
+
+local btnSelect = createButton("BtnSelect", "Select")
+local btnMove = createButton("BtnMove", "Move")
+local btnRotate = createButton("BtnRotate", "Rotate")
+local btnScale = createButton("BtnScale", "Scale")
+
+-- ==========================================
+-- 3. STATE VARIABLES
+-- ==========================================
+local currentMode = "Move"
+local selectedPart = nil
+local originalCFrame = nil
+local originalSize = nil
+local isSelecting = true
+local isDraggingHandle = false 
+
+-- ==========================================
+-- 4. UI LOGIC & TOGGLES
+-- ==========================================
+local function updateSelectButton()
+	if isSelecting then
+		btnSelect.BackgroundColor3 = Color3.fromRGB(80, 150, 255) -- Active (Blue)
+	else
+		btnSelect.BackgroundColor3 = Color3.fromRGB(45, 45, 45) -- Locked (Gray)
+	end
+end
+
+btnSelect.MouseButton1Click:Connect(function()
+	isSelecting = not isSelecting
+	updateSelectButton()
+end)
+
+local function updateMode(mode)
+	currentMode = mode
+	
+	btnMove.BackgroundColor3 = (mode == "Move") and Color3.fromRGB(80, 150, 255) or Color3.fromRGB(45, 45, 45)
+	btnRotate.BackgroundColor3 = (mode == "Rotate") and Color3.fromRGB(80, 150, 255) or Color3.fromRGB(45, 45, 45)
+	btnScale.BackgroundColor3 = (mode == "Scale") and Color3.fromRGB(80, 150, 255) or Color3.fromRGB(45, 45, 45)
+	
+	if selectedPart then
+		selectionBox.Adornee = selectedPart
+		moveHandles.Adornee = (mode == "Move") and selectedPart or nil
+		rotateHandles.Adornee = (mode == "Rotate") and selectedPart or nil
+		scaleHandles.Adornee = (mode == "Scale") and selectedPart or nil
+	else
+		selectionBox.Adornee = nil
+		moveHandles.Adornee = nil
+		rotateHandles.Adornee = nil
+		scaleHandles.Adornee = nil
+	end
+end
+
+btnMove.MouseButton1Click:Connect(function() updateMode("Move") end)
+btnRotate.MouseButton1Click:Connect(function() updateMode("Rotate") end)
+btnScale.MouseButton1Click:Connect(function() updateMode("Scale") end)
+
+-- ==========================================
+-- 5. RAYCAST SELECTION LOGIC (HITS INVISIBLE OBJECTS)
+-- ==========================================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		-- If clicking on UI, ignore
+		if gameProcessed then return end
+
+		-- Check if hovering over our custom BTool GUI at the bottom
+		local pos = UserInputService:GetMouseLocation()
+		local guisAtPosition = player.PlayerGui:GetGuiObjectsAtPosition(pos.X, pos.Y)
+		for _, guiObj in ipairs(guisAtPosition) do
+			if guiObj:IsDescendantOf(gui) then return end
+		end
+
+		-- Wait 1 frame to confirm we aren't clicking a 3D Handle arrow
+		task.wait()
+		if isDraggingHandle then return end 
+
+		if isSelecting then
+			-- Raycast para mahanap kahit ang invisible na parts
+			local ray = camera:ViewportPointToRay(pos.X, pos.Y)
+			
+			-- Parameter setup (Walang ini-ignore para makuha lahat)
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Exclude
+			params.FilterDescendantsInstances = {} 
+			
+			local result = workspace:Raycast(ray.Origin, ray.Direction * 2000, params)
+			
+			local target = result and result.Instance or mouse.Target
+			
+			if target and target:IsA("BasePart") then
+				selectedPart = target
+				updateMode(currentMode)
+			else
+				selectedPart = nil
+				updateMode(currentMode)
+			end
+		end
+	end
+end)
+
+-- Bulletproof fix: Irereset ang drag pag binitawan ang screen/mouse
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		isDraggingHandle = false
+	end
+end)
+
+-- ==========================================
+-- 6. DRAG MECHANICS (MATH & MOVEMENT)
+-- ==========================================
+-- MOVE
+moveHandles.MouseButton1Down:Connect(function()
+	isDraggingHandle = true
+	if selectedPart then originalCFrame = selectedPart.CFrame end
+end)
+moveHandles.MouseDrag:Connect(function(face, distance)
+	if selectedPart and originalCFrame then
+		local delta = Vector3.FromNormalId(face) * distance
+		selectedPart.CFrame = originalCFrame * CFrame.new(delta)
+	end
+end)
+
+-- ROTATE
+rotateHandles.MouseButton1Down:Connect(function()
+	isDraggingHandle = true
+	if selectedPart then originalCFrame = selectedPart.CFrame end
+end)
+rotateHandles.MouseDrag:Connect(function(axis, relativeAngle, deltaRadius)
+	if selectedPart and originalCFrame then
+		local axisVec = Vector3.FromAxis(axis)
+		local rot = CFrame.fromAxisAngle(axisVec, relativeAngle)
+		selectedPart.CFrame = originalCFrame * rot
+	end
+end)
+
+-- SCALE
+scaleHandles.MouseButton1Down:Connect(function()
+	isDraggingHandle = true
+	if selectedPart then
+		originalCFrame = selectedPart.CFrame
+		originalSize = selectedPart.Size
+	end
+end)
+scaleHandles.MouseDrag:Connect(function(face, distance)
+	if selectedPart and originalSize and originalCFrame then
+		local normal = Vector3.FromNormalId(face)
+		local deltaSize = Vector3.new(math.abs(normal.X), math.abs(normal.Y), math.abs(normal.Z)) * distance
+		selectedPart.Size = originalSize + deltaSize
+		selectedPart.CFrame = originalCFrame * CFrame.new(normal * (distance / 2))
+	end
+end)
+
+-- ==========================================
+-- 7. INITIALIZE
+-- ==========================================
+updateSelectButton()
+updateMode("Move")
+print("Visual BTools PRO Loaded! You can now select INVISIBLE objects.")
